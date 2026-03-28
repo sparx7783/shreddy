@@ -5,7 +5,7 @@ package shreddy
 import (
 	"context"
 
-	"github.com/sparx7783/shred/xdp"
+	"github.com/sparx7783/shreddy/xdp"
 )
 
 type XDPConfig = xdp.Config
