@@ -1,4 +1,4 @@
-module github.com/sparx7783/shred
+module github.com/sparx7783/shreddy
 
 go 1.26.0
 
