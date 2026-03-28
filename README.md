@@ -12,7 +12,7 @@ Some of the code was taken from [radiance](https://github.com/firedancer-io/radi
 ## Notes
 
 - Shreddy is synchronous, I wouldn't try to run async decoders without creating a separate assembler and on different ports, but mostly untested. 
-- Async support is probably not coming since on a single go routine/thread it can handle multiple shred providers worth of traffic, but you can always open a PR / maybe I'll add it in the future if needed.
+- Async support is probably not coming since a single goroutine/thread can handle multiple shred providers worth of traffic, but you can always open a PR / maybe I'll add it in the future if needed.
 - XDP implementation might need some work, currently to maintain sync support it only supports streaming from one RX Queue, you can direct all port traffic to a single queue by configuring NIC flow steering like this `sudo ethtool -N ens18 flow-type udp4 dst-port 7777 action 0` which would set all rx traffic to queue 0 on port 7777.
 - `ZeroCopy: true` attempts AF_XDP zerocopy first and falls back to copy mode if unsupported by the NIC/driver.
 
