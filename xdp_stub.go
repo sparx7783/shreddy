@@ -1,6 +1,6 @@
 //go:build !linux
 
-package shred
+package shreddy
 
 import (
 	"context"

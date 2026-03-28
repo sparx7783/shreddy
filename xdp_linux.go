@@ -1,9 +1,10 @@
 //go:build linux
 
-package shred
+package shreddy
 
 import (
 	"context"
+
 	"github.com/sparx7783/shred/xdp"
 )
 

@@ -1,4 +1,4 @@
-package shred
+package shreddy
 
 import (
 	"sync"
