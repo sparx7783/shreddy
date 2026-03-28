@@ -1,6 +1,6 @@
 # Shreddy
 
-**A minimal shred decoder library written in golang and designed to be fast and easy to use**
+**A minimal shred decoder library written in golang, designed to be fast and easy to use**
 
 ---
 
