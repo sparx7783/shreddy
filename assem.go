@@ -8,6 +8,7 @@ import (
 const (
 	MaxDataShredsPerSlot = 32768
 	MaxSlotsTracked      = 64
+	MaxEntriesPerBatch   = 1000
 )
 
 type Tracker struct {
@@ -312,7 +313,7 @@ func parseEntriesFromShredPayload(payload []byte) ([]Entry, error) {
 	}
 
 	numEntries := binary.LittleEndian.Uint64(payload[:8])
-	if numEntries == 0 {
+	if numEntries == 0 || numEntries > MaxEntriesPerBatch {
 		return nil, errInvalidEntryPayload
 	}
 

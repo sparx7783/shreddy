@@ -11,6 +11,8 @@ var (
 	errEntryTxLen     = errors.New("entry: bad transaction length")
 )
 
+const MaxTransactionsPerEntry = 100
+
 func (en *Entry) unmarshal(data []byte, off int) (int, error) {
 	if len(data)-off < 48 {
 		return off, errEntryTooShort
@@ -24,7 +26,10 @@ func (en *Entry) unmarshal(data []byte, off int) (int, error) {
 
 	txCount := binary.LittleEndian.Uint64(data[off:])
 	off += 8
-	
+
+	if txCount > MaxTransactionsPerEntry {
+		return off, errEntryTooManyTx
+	}
 	if txCount == 0 {
 		return off, nil
 	}
