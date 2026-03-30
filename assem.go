@@ -8,13 +8,14 @@ import (
 const (
 	MaxDataShredsPerSlot = 32768
 	MaxSlotsTracked      = 64
-	MaxEntriesPerBatch   = 1000
 )
 
 type Tracker struct {
 	shredStatus    [MaxDataShredsPerSlot]uint8
 	shredPointers  [MaxDataShredsPerSlot]*Shred
 	indexProcessed [MaxDataShredsPerSlot]bool
+
+	completedData bitset
 
 	highestIndex uint32
 	lowestIndex  uint32
@@ -36,7 +37,7 @@ type Assembler struct {
 	rs            rsCache
 
 	CurrentSlot uint64
-	OnSlot      func(slot uint64) // called when a new highest slot is seen
+	OnSlot      func(slot uint64)
 }
 
 func NewAssembler() *Assembler {
@@ -87,8 +88,9 @@ func (a *Assembler) Push(sh *Shred) [][]Entry {
 		return nil
 	}
 
-	if entries, ok := a.assemble(tracker, sh.Index); ok {
-		return [][]Entry{entries}
+	batches := a.assemble(tracker, sh.Index)
+	if len(batches) > 0 {
+		return batches
 	}
 	return nil
 }
@@ -102,6 +104,7 @@ func (a *Assembler) updateTracker(sh *Shred, tracker *Tracker) bool {
 
 	if sh.DataHeader.EndOfBatch() || sh.DataHeader.EndOfBlock() {
 		tracker.shredStatus[index] = 2
+		tracker.completedData.set(index)
 	} else {
 		tracker.shredStatus[index] = 1
 	}
@@ -171,28 +174,61 @@ func (a *Assembler) addToFECSet(slotState *SlotState, sh *Shred) (*FECSetState, 
 	return set, true
 }
 
-func (a *Assembler) assemble(tracker *Tracker, triggerIndex uint32) ([]Entry, bool) {
-
-	start, end, found := a.getSegment(tracker, triggerIndex)
-	if !found {
-		return nil, false
+func (tracker *Tracker) findRange(idx uint32) (start, end uint32, found bool) {
+	endIdx, ok := tracker.completedData.nextSet(idx)
+	if !ok {
+		return 0, 0, false
 	}
 
-	segmentSize := end - start + 1
-	segment := a.segmentBuffer[:segmentSize]
+	if prevEnd, ok := tracker.completedData.prevSet(endIdx); ok {
+		start = prevEnd + 1
+	}
 
-	for i := uint32(0); i < segmentSize; i++ {
-		segment[i] = tracker.shredPointers[start+i]
-		if segment[i] == nil {
-			return nil, false
+	if tracker.indexProcessed[start] {
+		return 0, 0, false
+	}
+
+	for i := start; i <= endIdx; i++ {
+		if tracker.shredStatus[i] == 0 {
+			return 0, 0, false
 		}
 	}
 
-	payload := a.concatPayload(segment)
+	return start, endIdx, true
+}
 
-	entries, err := parseEntriesFromShredPayload(payload)
+func (a *Assembler) assemble(tracker *Tracker, triggerIndex uint32) [][]Entry {
+	var batches [][]Entry
+	idx := triggerIndex
 
-	if err == nil {
+	for {
+		start, end, found := tracker.findRange(idx)
+		if !found {
+			break
+		}
+
+		segmentSize := end - start + 1
+		segment := a.segmentBuffer[:segmentSize]
+
+		allPresent := true
+		for i := uint32(0); i < segmentSize; i++ {
+			segment[i] = tracker.shredPointers[start+i]
+			if segment[i] == nil {
+				allPresent = false
+				break
+			}
+		}
+		if !allPresent {
+			break
+		}
+
+		payload := a.concatPayload(segment)
+
+		entries, err := parseEntriesFromShredPayload(payload)
+		if err != nil {
+			break
+		}
+
 		slot := segment[0].Slot
 		for i := range entries {
 			entries[i].Slot = slot
@@ -201,55 +237,16 @@ func (a *Assembler) assemble(tracker *Tracker, triggerIndex uint32) ([]Entry, bo
 		for i := start; i <= end; i++ {
 			tracker.indexProcessed[i] = true
 		}
-	}
 
-	return entries, err == nil
-}
+		batches = append(batches, entries)
 
-func (a *Assembler) getSegment(tracker *Tracker, index uint32) (start, end uint32, found bool) {
-
-	if index >= MaxDataShredsPerSlot || tracker.shredStatus[index] == 0 {
-		return 0, 0, false
-	}
-
-	end = index
-	for end < tracker.highestIndex+1 {
-		if tracker.indexProcessed[end] {
-			return 0, 0, false
-		}
-
-		status := tracker.shredStatus[end]
-		if status == 0 {
-			return 0, 0, false
-		}
-		if status == 2 {
+		idx = end + 1
+		if idx > tracker.highestIndex {
 			break
 		}
-		end++
 	}
 
-	if tracker.shredStatus[end] != 2 {
-		return 0, 0, false
-	}
-
-	start = index
-	if index > 0 {
-		for i := index - 1; ; i-- {
-			status := tracker.shredStatus[i]
-			if status == 2 {
-				break
-			}
-			if status == 0 || tracker.indexProcessed[i] {
-				break
-			}
-			start = i
-			if i == 0 {
-				break
-			}
-		}
-	}
-
-	return start, end, true
+	return batches
 }
 
 func (a *Assembler) getOrCreateSlotState(slot uint64) *SlotState {
@@ -293,6 +290,7 @@ func (a *Assembler) resetSlotState(state *SlotState) {
 		tracker.shredStatus[i] = 0
 		tracker.shredPointers[i] = nil
 		tracker.indexProcessed[i] = false
+		tracker.completedData.clear(i)
 	}
 
 	for i := uint32(0); i < state.fecTouchedCnt; i++ {
@@ -313,7 +311,7 @@ func parseEntriesFromShredPayload(payload []byte) ([]Entry, error) {
 	}
 
 	numEntries := binary.LittleEndian.Uint64(payload[:8])
-	if numEntries == 0 || numEntries > MaxEntriesPerBatch {
+	if numEntries == 0 || numEntries > uint64(len(payload)-8)/48 {
 		return nil, errInvalidEntryPayload
 	}
 
@@ -339,9 +337,7 @@ func (a *Assembler) pushRecovered(tracker *Tracker, recovered []*Shred) [][]Entr
 		if !a.updateTracker(sh, tracker) {
 			continue
 		}
-		if entries, ok := a.assemble(tracker, sh.Index); ok {
-			batches = append(batches, entries)
-		}
+		batches = append(batches, a.assemble(tracker, sh.Index)...)
 	}
 	return batches
 }
