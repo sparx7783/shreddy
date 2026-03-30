@@ -30,7 +30,7 @@ Some of the code was taken from [radiance](https://github.com/firedancer-io/radi
 ## Installation
 
 ```bash
-go get github.com/sparx7783/shred
+go get github.com/sparx7783/shreddy
 ```
 
 ## Quick Start
@@ -46,14 +46,14 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/sparx7783/shred"
+	"github.com/sparx7783/shreddy"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	asm := shred.NewAssembler()
+	asm := shreddy.NewAssembler()
 	decodeCh := make(chan shred.Entry, 1024)
 
 	go func() {
@@ -77,7 +77,7 @@ func main() {
 		log.Printf("new slot: %d\n", slot)
 	}
 
-	err := shred.ListenUDP(ctx, 7777, func(packet []byte) {
+	err := shreddy.ListenUDP(ctx, 7777, func(packet []byte) {
 		sh := shred.NewShredFromSerialized(packet)
 		if !sh.Ok() {
 			return
@@ -110,14 +110,14 @@ import (
 	"os"
 	"os/signal"
 	
-	"github.com/sparx7783/shred"
+	"github.com/sparx7783/shreddy"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	asm := shred.NewAssembler()
+	asm := shreddy.NewAssembler()
 	decodeCh := make(chan shred.Entry, 1024)
 
 	go func() {
@@ -141,7 +141,7 @@ func main() {
 		log.Printf("new slot: %d\n", slot)
 	}
 
-	cfg := shred.XDPConfig{
+	cfg := shreddy.XDPConfig{
 		Interface: "eth0",
 		Port:      7777,
 		RXQueue:   0,
