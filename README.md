@@ -54,7 +54,7 @@ func main() {
 	defer stop()
 
 	asm := shreddy.NewAssembler()
-	decodeCh := make(chan shred.Entry, 1024)
+	decodeCh := make(chan shreddy.Entry, 1024)
 
 	go func() {
 		for {
@@ -78,7 +78,7 @@ func main() {
 	}
 
 	err := shreddy.ListenUDP(ctx, 7777, func(packet []byte) {
-		sh := shred.NewShredFromSerialized(packet)
+		sh := shreddy.NewShredFromSerialized(packet)
 		if !sh.Ok() {
 			return
 		}
@@ -118,7 +118,7 @@ func main() {
 	defer stop()
 
 	asm := shreddy.NewAssembler()
-	decodeCh := make(chan shred.Entry, 1024)
+	decodeCh := make(chan shreddy.Entry, 1024)
 
 	go func() {
 		for {
@@ -150,8 +150,8 @@ func main() {
 		ZeroCopy:  true,
 	}
 
-	err := shred.ListenXDP(ctx, cfg, func(packet []byte) {
-		sh := shred.NewShredFromSerialized(packet)
+	err := shreddy.ListenXDP(ctx, cfg, func(packet []byte) {
+		sh := shreddy.NewShredFromSerialized(packet)
 		if !sh.Ok() {
 			return
 		}
