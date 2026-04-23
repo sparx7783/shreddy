@@ -13,41 +13,47 @@ func (p *txParser) remaining() int {
 	return len(p.data) - p.off
 }
 
-func (p *txParser) compactU16() uint16 {
+// compactU16 parses a compact-u16 from the current offset. Returns ok=false
+// if the encoding runs past the end of data.
+func (p *txParser) compactU16() (v uint16, ok bool) {
+	if p.off >= len(p.data) {
+		return 0, false
+	}
 	b := p.data[p.off]
 	if b < 0x80 {
 		p.off++
-		return uint16(b)
+		return uint16(b), true
+	}
+	if p.off+1 >= len(p.data) {
+		return 0, false
 	}
 	val := uint16(b & 0x7f)
 	b = p.data[p.off+1]
 	if b < 0x80 {
 		p.off += 2
-		return val | uint16(b)<<7
+		return val | uint16(b)<<7, true
 	}
+	if p.off+2 >= len(p.data) {
+		return 0, false
+	}
+	c := p.data[p.off+2]
 	p.off += 3
-	return val | uint16(b&0x7f)<<7 | uint16(p.data[p.off-1]&0x03)<<14
+	return val | uint16(b&0x7f)<<7 | uint16(c&0x03)<<14, true
 }
 
-func transactionLength(data []byte) (length int, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			length, err = 0, errMalformedTx
-		}
-	}()
-
+func transactionLength(data []byte) (int, error) {
 	p := txParser{data: data}
 
-	numSigs := int(p.compactU16())
-	if numSigs <= 0 || p.remaining() < numSigs*64 {
+	numSigs, ok := p.compactU16()
+	if !ok || numSigs == 0 || p.remaining() < int(numSigs)*64 {
 		return 0, errMalformedTx
 	}
-	p.off += numSigs * 64
+	p.off += int(numSigs) * 64
 
 	if p.remaining() < 1 {
 		return 0, errMalformedTx
 	}
-	versioned := data[p.off] >= 0x80
+	versioned := p.data[p.off] >= 0x80
 	if versioned {
 		p.off++
 	}
@@ -57,56 +63,62 @@ func transactionLength(data []byte) (length int, err error) {
 	}
 	p.off += 3
 
-	numKeys := int(p.compactU16())
-	if numKeys < 0 || p.remaining() < numKeys*32 {
+	numKeys, ok := p.compactU16()
+	if !ok || p.remaining() < int(numKeys)*32 {
 		return 0, errMalformedTx
 	}
-	p.off += numKeys * 32
+	p.off += int(numKeys) * 32
 
 	if p.remaining() < 32 {
 		return 0, errMalformedTx
 	}
 	p.off += 32
 
-	numIx := int(p.compactU16())
-	for i := 0; i < numIx; i++ {
+	numIx, ok := p.compactU16()
+	if !ok {
+		return 0, errMalformedTx
+	}
+	for i := uint16(0); i < numIx; i++ {
 		if p.remaining() < 1 {
 			return 0, errMalformedTx
 		}
 		p.off++
 
-		numAccs := int(p.compactU16())
-		if numAccs < 0 || p.remaining() < numAccs {
+		numAccs, ok := p.compactU16()
+		if !ok || p.remaining() < int(numAccs) {
 			return 0, errMalformedTx
 		}
-		p.off += numAccs
+		p.off += int(numAccs)
 
-		dataLen := int(p.compactU16())
-		if dataLen < 0 || p.remaining() < dataLen {
+		dataLen, ok := p.compactU16()
+		if !ok || p.remaining() < int(dataLen) {
 			return 0, errMalformedTx
 		}
-		p.off += dataLen
+		p.off += int(dataLen)
 	}
 
 	if versioned {
-		numLookups := int(p.compactU16())
-		for i := 0; i < numLookups; i++ {
+		numLookups, ok := p.compactU16()
+		if !ok {
+			return 0, errMalformedTx
+		}
+		for i := uint16(0); i < numLookups; i++ {
 			if p.remaining() < 32 {
 				return 0, errMalformedTx
 			}
 			p.off += 32
 
-			numWritable := int(p.compactU16())
-			if numWritable < 0 || p.remaining() < numWritable {
+			numWritable, ok := p.compactU16()
+			if !ok || p.remaining() < int(numWritable) {
 				return 0, errMalformedTx
 			}
-			p.off += numWritable
+			p.off += int(numWritable)
 
-			numReadonly := int(p.compactU16())
-			if numReadonly < 0 || p.remaining() < numReadonly {
+			numReadonly, ok := p.compactU16()
+			if !ok || p.remaining() < int(numReadonly) {
 				return 0, errMalformedTx
 			}
-			p.off += numReadonly
+			p.off += int(numReadonly)
 		}
 	}
 
