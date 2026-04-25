@@ -12,7 +12,11 @@ type Shred struct {
 	CommonHeader
 	DataHeader
 	CodeHeader
-	Payload      []byte
+	Payload []byte
+	// RawPayload is non-nil only when the backing buffer was obtained from
+	// rawPayloadPool (cap == PacketDataSize). releaseShred uses that cap to
+	// decide whether to return the buffer to the pool, so do not hand a
+	// cap-PacketDataSize buffer from any other source into this field.
 	RawPayload   []byte
 	ErasureShard []byte
 }

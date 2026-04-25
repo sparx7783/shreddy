@@ -59,16 +59,22 @@ func NewAssembler() *Assembler {
 
 func (a *Assembler) Push(sh *Shred) [][]Entry {
 	if !sh.Sanitize() {
+		releaseShred(sh)
 		return nil
 	}
 
 	slotState := a.getOrCreateSlotState(sh.Slot)
-	set, ok := a.addToFECSet(slotState, sh)
+	set, stored, ok := a.addToFECSet(slotState, sh)
 	if !ok {
+		releaseShred(sh)
 		return nil
 	}
 
 	if sh.IsCode() {
+		if !stored {
+			releaseShred(sh)
+			return nil
+		}
 		if set.recovered {
 			return nil
 		}
@@ -80,11 +86,17 @@ func (a *Assembler) Push(sh *Shred) [][]Entry {
 	}
 
 	tracker := slotState.tracker
-	if set.recovered || tracker.indexProcessed[sh.Index] {
+	if !stored || set.recovered || tracker.indexProcessed[sh.Index] {
+		if !stored {
+			releaseShred(sh)
+		}
 		return nil
 	}
 
 	if !a.updateTracker(sh, tracker) {
+		// Reachable when a prior shred with the same global Index but a
+		// different FECSetIndex already occupies the tracker slot.
+		releaseShred(sh)
 		return nil
 	}
 
@@ -122,9 +134,9 @@ func (a *Assembler) updateTracker(sh *Shred, tracker *Tracker) bool {
 	return true
 }
 
-func (a *Assembler) addToFECSet(slotState *SlotState, sh *Shred) (*FECSetState, bool) {
+func (a *Assembler) addToFECSet(slotState *SlotState, sh *Shred) (set *FECSetState, stored, ok bool) {
 	fecSetIndex := sh.FECSetIndex
-	set := slotState.fecSets[fecSetIndex]
+	set = slotState.fecSets[fecSetIndex]
 	if set == nil {
 		set = &FECSetState{
 			slot:        sh.Slot,
@@ -138,11 +150,12 @@ func (a *Assembler) addToFECSet(slotState *SlotState, sh *Shred) (*FECSetState, 
 	if sh.IsData() {
 		rel := int(sh.Index - sh.FECSetIndex)
 		if rel < 0 || rel >= len(set.data) {
-			return nil, false
+			return nil, false, false
 		}
 		if set.data[rel] == nil {
 			set.data[rel] = sh
 			set.dataCount++
+			stored = true
 		}
 		if sh.ErasureShard != nil {
 			set.shardSize = len(sh.ErasureShard)
@@ -150,14 +163,14 @@ func (a *Assembler) addToFECSet(slotState *SlotState, sh *Shred) (*FECSetState, 
 		if sh.DataHeader.EndOfBatch() || sh.DataHeader.EndOfBlock() {
 			set.numData = rel + 1
 		}
-		return set, true
+		return set, stored, true
 	}
 
 	if set.numData != 0 && set.numData != int(sh.CodeHeader.NumDataShreds) {
-		return nil, false
+		return nil, false, false
 	}
 	if set.numCode != 0 && set.numCode != int(sh.CodeHeader.NumCodeShreds) {
-		return nil, false
+		return nil, false, false
 	}
 
 	set.numData = int(sh.CodeHeader.NumDataShreds)
@@ -170,8 +183,9 @@ func (a *Assembler) addToFECSet(slotState *SlotState, sh *Shred) (*FECSetState, 
 	if set.code[pos] == nil {
 		set.code[pos] = sh
 		set.codeCount++
+		stored = true
 	}
-	return set, true
+	return set, stored, true
 }
 
 func (tracker *Tracker) findRange(idx uint32) (start, end uint32, found bool) {
@@ -286,7 +300,13 @@ func (a *Assembler) getOrCreateSlotState(slot uint64) *SlotState {
 func (a *Assembler) resetSlotState(state *SlotState) {
 	tracker := state.tracker
 
+	// Release all pooled buffers referenced from the tracker and FEC sets.
+	// releaseShred is idempotent (no-op once RawPayload is nil), so pointers
+	// shared between the tracker and set.data are safe to hit twice.
 	for i := tracker.lowestIndex; i <= tracker.highestIndex; i++ {
+		if sh := tracker.shredPointers[i]; sh != nil {
+			releaseShred(sh)
+		}
 		tracker.shredStatus[i] = 0
 		tracker.shredPointers[i] = nil
 		tracker.indexProcessed[i] = false
@@ -294,6 +314,21 @@ func (a *Assembler) resetSlotState(state *SlotState) {
 	}
 
 	for i := uint32(0); i < state.fecTouchedCnt; i++ {
+		set := state.fecSets[state.fecTouched[i]]
+		if set != nil {
+			for j := range set.code {
+				if sh := set.code[j]; sh != nil {
+					releaseShred(sh)
+					set.code[j] = nil
+				}
+			}
+			for j := range set.data {
+				if sh := set.data[j]; sh != nil {
+					releaseShred(sh)
+					set.data[j] = nil
+				}
+			}
+		}
 		state.fecSets[state.fecTouched[i]] = nil
 	}
 

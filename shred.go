@@ -60,7 +60,7 @@ func NewShredFromSerialized(shred []byte) (s Shred) {
 			return
 		}
 
-		s.RawPayload = make([]byte, total)
+		s.RawPayload = getRawPayload(total)
 		copy(s.RawPayload, shred[:total])
 		s.ErasureShard = s.RawPayload[start:end]
 	case (variant & MerkleTypeMask) == MerkleDataID:
@@ -87,7 +87,7 @@ func NewShredFromSerialized(shred []byte) (s Shred) {
 			return
 		}
 
-		s.RawPayload = make([]byte, total)
+		s.RawPayload = getRawPayload(total)
 		copy(s.RawPayload, shred[:total])
 		s.Payload = s.RawPayload[payloadOff:payloadEnd]
 		s.ErasureShard = s.RawPayload[start:end]

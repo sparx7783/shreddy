@@ -54,15 +54,18 @@ func (a *Assembler) tryRecoverFEC(set *FECSetState) ([]*Shred, error) {
 		return nil, err
 	}
 
+	// reedsolomon.ReconstructData does not modify shards that are already
+	// present; it only allocates and fills the nil entries. So we can alias
+	// the existing erasure shards directly without copying.
 	shards := make([][]byte, set.numData+set.numCode)
 	for i := 0; i < set.numData; i++ {
 		if sh := set.data[i]; sh != nil {
-			shards[i] = append([]byte(nil), sh.ErasureShard...)
+			shards[i] = sh.ErasureShard
 		}
 	}
 	for i := 0; i < set.numCode; i++ {
 		if sh := set.code[i]; sh != nil {
-			shards[set.numData+i] = append([]byte(nil), sh.ErasureShard...)
+			shards[set.numData+i] = sh.ErasureShard
 		}
 	}
 
@@ -103,14 +106,16 @@ func recoveredDataShred(set *FECSetState, shardIndex int, shard []byte) (*Shred,
 	sh.DataHeader.ParentOffset = binary.LittleEndian.Uint16(shard[19:21])
 	sh.DataHeader.Flags = shard[21]
 	sh.DataHeader.Size = binary.LittleEndian.Uint16(shard[22:24])
-	sh.ErasureShard = append([]byte(nil), shard...)
 
 	payloadLen := int(sh.DataHeader.Size) - DataHeaderSize
 	if payloadLen < 0 || payloadLen > len(shard)-24 {
 		return nil, fmt.Errorf("invalid reconstructed payload size: %d", payloadLen)
 	}
 
-	sh.Payload = append([]byte(nil), shard[24:24+payloadLen]...)
+	// The shard is freshly allocated by reedsolomon and owned solely by
+	// this recovered shred, so we can alias into it instead of copying.
+	sh.ErasureShard = shard
+	sh.Payload = shard[24 : 24+payloadLen]
 	if !sh.Sanitize() {
 		return nil, fmt.Errorf("recovered shred failed sanitize: index=%d", sh.Index)
 	}
